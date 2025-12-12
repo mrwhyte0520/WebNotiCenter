@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Eye, EyeOff, Copy, Trash2, ExternalLink } from "lucide-react"
+import { Eye, EyeOff, Copy, Trash2, ExternalLink, Pencil } from "lucide-react"
 import type { Application } from "@/lib/types"
 import { createClient } from "@/lib/supabase/client"
 import {
@@ -18,6 +18,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 
 interface ApplicationsListProps {
   applications: Application[]
@@ -28,6 +39,11 @@ interface ApplicationsListProps {
 export function ApplicationsList({ applications, onApplicationDeleted, onApplicationUpdated }: ApplicationsListProps) {
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [editingApp, setEditingApp] = useState<Application | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editWebhookUrl, setEditWebhookUrl] = useState("")
+  const [editIsActive, setEditIsActive] = useState(true)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const toggleKeyVisibility = (id: string) => {
     setVisibleKeys((prev) => {
@@ -39,6 +55,44 @@ export function ApplicationsList({ applications, onApplicationDeleted, onApplica
       }
       return newSet
     })
+  }
+
+  const openEdit = (app: Application) => {
+    setEditingApp(app)
+    setEditName(app.name)
+    setEditWebhookUrl(app.webhook_url || "")
+    setEditIsActive(Boolean(app.is_active))
+  }
+
+  const saveEdit = async () => {
+    if (!editingApp) return
+    setSavingEdit(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("applications")
+        .update({
+          name: editName,
+          webhook_url: editWebhookUrl.trim() ? editWebhookUrl.trim() : null,
+          is_active: editIsActive,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingApp.id)
+        .select()
+        .single()
+
+      if (error || !data) {
+        return
+      }
+
+      if (onApplicationUpdated) {
+        onApplicationUpdated(data as Application)
+      }
+
+      setEditingApp(null)
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   const copyToClipboard = (text: string) => {
@@ -157,29 +211,72 @@ export function ApplicationsList({ applications, onApplicationDeleted, onApplica
               <p className="text-xs text-muted-foreground">Creada: {new Date(app.created_at).toLocaleDateString()}</p>
             </div>
 
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Eliminar Aplicación</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Esta acción eliminará la aplicación y todas sus notificaciones asociadas. Esta acción no se puede
-                    deshacer.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => deleteApplication(app.id)}>Eliminar</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => openEdit(app)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Eliminar Aplicación</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción eliminará la aplicación y todas sus notificaciones asociadas. Esta acción no se puede
+                      deshacer.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => deleteApplication(app.id)}>Eliminar</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </div>
         </Card>
       ))}
+
+      <Dialog open={Boolean(editingApp)} onOpenChange={(open) => (!open ? setEditingApp(null) : undefined)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Editar aplicación</DialogTitle>
+            <DialogDescription>Actualiza el nombre, webhook y estado de la aplicación.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">Nombre</Label>
+              <Input id="edit-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-webhook">Webhook URL (opcional)</Label>
+              <Input
+                id="edit-webhook"
+                type="url"
+                placeholder="https://tu-app.com/api/webhooks/notifications"
+                value={editWebhookUrl}
+                onChange={(e) => setEditWebhookUrl(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-active">Activa</Label>
+              <Switch id="edit-active" checked={editIsActive} onCheckedChange={setEditIsActive} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingApp(null)} disabled={savingEdit}>
+              Cancelar
+            </Button>
+            <Button onClick={saveEdit} disabled={savingEdit || !editName.trim()}>
+              {savingEdit ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

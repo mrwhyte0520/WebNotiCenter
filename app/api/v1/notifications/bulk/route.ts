@@ -46,8 +46,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to create notifications" }, { status: 500 })
     }
 
+    let webhook_sent = false
+    let webhook_error: string | undefined
+
+    if (application.webhook_url && createdNotifications && createdNotifications.length > 0) {
+      try {
+        await fetch(application.webhook_url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Notification-Event": "notification.bulk_created",
+            "X-Notification-App-Id": application.id,
+          },
+          body: JSON.stringify({
+            event: "notification.bulk_created",
+            notifications: createdNotifications,
+            count: createdNotifications.length,
+          }),
+        })
+        webhook_sent = true
+      } catch (webhookError: unknown) {
+        webhook_sent = false
+        webhook_error = webhookError instanceof Error ? webhookError.message : "Error enviando webhook"
+        console.error("[v0] Webhook error:", webhookError)
+      }
+    }
+
     return NextResponse.json(
-      { success: true, notifications: createdNotifications, count: createdNotifications?.length || 0 },
+      {
+        success: true,
+        notifications: createdNotifications,
+        count: createdNotifications?.length || 0,
+        webhook_sent,
+        webhook_error,
+      },
       { status: 201 },
     )
   } catch (error) {

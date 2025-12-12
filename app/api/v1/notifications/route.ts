@@ -52,6 +52,8 @@ export async function POST(request: NextRequest) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "X-Notification-Event": "notification.created",
+            "X-Notification-App-Id": application.id,
           },
           body: JSON.stringify({
             event: "notification.created",

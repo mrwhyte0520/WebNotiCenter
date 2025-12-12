@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
     const { data: application, error: appError } = await supabase
       .from("applications")
-      .select("id,name,owner_id")
+      .select("id,name,owner_id,webhook_url")
       .eq("id", app_id)
       .eq("owner_id", user.id)
       .single()
@@ -68,6 +68,8 @@ export async function POST(request: Request) {
       inserted: boolean
       emailed: boolean
       email_error?: string
+      webhook_sent?: boolean
+      webhook_error?: string
       error?: string
     }> = []
 
@@ -115,6 +117,40 @@ export async function POST(request: Request) {
         continue
       }
 
+      let webhook_sent = false
+      let webhook_error: string | undefined
+
+      if (application.webhook_url) {
+        try {
+          await fetch(application.webhook_url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Notification-Event": "notification.created",
+              "X-Notification-App-Id": app_id,
+            },
+            body: JSON.stringify({
+              event: "notification.created",
+              notification: {
+                id: notification.id,
+                app_id,
+                user_id,
+                title,
+                message,
+                type,
+                priority,
+                data,
+                expires_at: expires_at || null,
+              },
+            }),
+          })
+          webhook_sent = true
+        } catch (webhookError: unknown) {
+          webhook_sent = false
+          webhook_error = webhookError instanceof Error ? webhookError.message : "Error enviando webhook"
+        }
+      }
+
       let emailed = false
       if (send_email && resolvedEmail) {
         try {
@@ -135,6 +171,8 @@ export async function POST(request: Request) {
             inserted: true,
             emailed: false,
             email_error: emailError instanceof Error ? emailError.message : "Error enviando email",
+            webhook_sent,
+            webhook_error,
           })
           continue
         }
@@ -146,11 +184,21 @@ export async function POST(request: Request) {
           inserted: true,
           emailed: false,
           email_error: "No se pudo resolver email para el destinatario",
+          webhook_sent,
+          webhook_error,
         })
         continue
       }
 
-      results.push({ user_id, email: resolvedEmail, notification_id: notification.id, inserted: true, emailed })
+      results.push({
+        user_id,
+        email: resolvedEmail,
+        notification_id: notification.id,
+        inserted: true,
+        emailed,
+        webhook_sent,
+        webhook_error,
+      })
     }
 
     return NextResponse.json({ ok: true, results })
