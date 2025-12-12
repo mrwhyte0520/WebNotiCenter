@@ -54,6 +54,7 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
   const [type, setType] = useState<string>("info")
   const [priority, setPriority] = useState<string>("normal")
   const [sendEmail, setSendEmail] = useState<boolean>(true)
+  const [broadcastAll, setBroadcastAll] = useState<boolean>(false)
 
   const [recipientsText, setRecipientsText] = useState("")
   const [dataText, setDataText] = useState("")
@@ -80,9 +81,11 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
         return
       }
 
-      if (parsedRecipients.length === 0) {
-        setError("Agrega al menos un destinatario")
-        return
+      if (!broadcastAll) {
+        if (parsedRecipients.length === 0) {
+          setError("Agrega al menos un destinatario")
+          return
+        }
       }
 
       let data: any = undefined
@@ -100,7 +103,8 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
           type,
           priority,
           data,
-          recipients: parsedRecipients,
+          recipients: broadcastAll ? undefined : parsedRecipients,
+          broadcast_all: broadcastAll,
           send_email: sendEmail,
         }),
       })
@@ -112,10 +116,17 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
         return
       }
 
-      const total = Array.isArray(payload.results) ? payload.results.length : 0
-      const emailed = Array.isArray(payload.results) ? payload.results.filter((r: any) => r.emailed).length : 0
-
-      setSuccess(`Enviadas: ${total}. Emails enviados: ${emailed}.`)
+      if (payload?.broadcast_all) {
+        const totalUsers = Number(payload.total_users || 0)
+        const inserted = Number(payload.inserted_count || 0)
+        const emailed = Number(payload.emailed_count || 0)
+        const failed = Number(payload.failed_email_count || 0)
+        setSuccess(`Usuarios: ${totalUsers}. Notificaciones creadas: ${inserted}. Emails enviados: ${emailed}. Emails fallidos: ${failed}.`)
+      } else {
+        const total = Array.isArray(payload.results) ? payload.results.length : 0
+        const emailed = Array.isArray(payload.results) ? payload.results.filter((r: any) => r.emailed).length : 0
+        setSuccess(`Enviadas: ${total}. Emails enviados: ${emailed}.`)
+      }
       setTitle("")
       setMessage("")
       setRecipientsText("")
@@ -130,7 +141,7 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
 
   return (
     <Card className="p-4 space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <div className="space-y-2">
           <Label>Aplicación</Label>
           <Select value={appId} onValueChange={setAppId}>
@@ -156,6 +167,19 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
             <SelectContent>
               <SelectItem value="yes">Sí</SelectItem>
               <SelectItem value="no">No</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Enviar a todos los usuarios</Label>
+          <Select value={broadcastAll ? "yes" : "no"} onValueChange={(v) => setBroadcastAll(v === "yes")}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="no">No</SelectItem>
+              <SelectItem value="yes">Sí</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -203,15 +227,17 @@ export function SendNotificationForm({ applications, onSent }: SendNotificationF
         <Textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Mensaje" />
       </div>
 
-      <div className="space-y-2">
-        <Label>Destinatarios (una línea por usuario)</Label>
-        <Textarea
-          value={recipientsText}
-          onChange={(e) => setRecipientsText(e.target.value)}
-          placeholder="user_123,user@example.com\nuser_456,otro@example.com\nsoloemail@example.com"
-        />
-        <div className="text-xs text-muted-foreground">Detectados: {parsedRecipients.length}</div>
-      </div>
+      {!broadcastAll && (
+        <div className="space-y-2">
+          <Label>Destinatarios (una línea por usuario)</Label>
+          <Textarea
+            value={recipientsText}
+            onChange={(e) => setRecipientsText(e.target.value)}
+            placeholder="user_123,user@example.com\nuser_456,otro@example.com\nsoloemail@example.com"
+          />
+          <div className="text-xs text-muted-foreground">Detectados: {parsedRecipients.length}</div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label>Data JSON (opcional)</Label>
