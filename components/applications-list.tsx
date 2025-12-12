@@ -208,7 +208,9 @@ export function ApplicationsList({ applications, onApplicationDeleted, onApplica
                 </div>
               )}
 
-              <p className="text-xs text-muted-foreground">Creada: {new Date(app.created_at).toLocaleDateString()}</p>
+              <p className="text-xs text-muted-foreground">
+                Creada: {new Date(app.created_at).toLocaleDateString("es-ES", { timeZone: "UTC" })}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">
