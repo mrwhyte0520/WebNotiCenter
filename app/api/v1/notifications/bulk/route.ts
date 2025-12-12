@@ -2,25 +2,57 @@ import { createClient } from "@/lib/supabase/server"
 import { validateApiKey } from "@/lib/api-auth"
 import { type NextRequest, NextResponse } from "next/server"
 
+ function getCorsHeaders(request: NextRequest) {
+   const origin = request.headers.get("origin")
+   return {
+     "Access-Control-Allow-Origin": origin ?? "*",
+     "Access-Control-Allow-Methods": "POST,OPTIONS",
+     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key",
+     Vary: "Origin",
+   }
+ }
+
+ function getApiKey(request: NextRequest) {
+   const headerKey = request.headers.get("x-api-key")
+   if (headerKey) return headerKey
+
+   const auth = request.headers.get("authorization")
+   if (auth?.toLowerCase().startsWith("bearer ")) {
+     const token = auth.slice(7).trim()
+     if (token) return token
+   }
+
+   const { searchParams } = new URL(request.url)
+   return searchParams.get("api_key")
+ }
+
+ export async function OPTIONS(request: NextRequest) {
+   return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) })
+ }
+
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = request.headers.get("x-api-key")
+    const apiKey = getApiKey(request)
+    const corsHeaders = getCorsHeaders(request)
 
     if (!apiKey) {
-      return NextResponse.json({ error: "API key is required" }, { status: 401 })
+      return NextResponse.json({ error: "API key is required" }, { status: 401, headers: corsHeaders })
     }
 
     const application = await validateApiKey(apiKey)
 
     if (!application) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 })
+      return NextResponse.json({ error: "Invalid API key" }, { status: 401, headers: corsHeaders })
     }
 
     const body = await request.json()
     const { notifications } = body
 
     if (!Array.isArray(notifications) || notifications.length === 0) {
-      return NextResponse.json({ error: "notifications array is required" }, { status: 400 })
+      return NextResponse.json(
+        { error: "notifications array is required" },
+        { status: 400, headers: corsHeaders },
+      )
     }
 
     const supabase = await createClient()
@@ -43,7 +75,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("[v0] Error creating bulk notifications:", error)
-      return NextResponse.json({ error: "Failed to create notifications" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Failed to create notifications" },
+        { status: 500, headers: corsHeaders },
+      )
     }
 
     let webhook_sent = false
@@ -80,10 +115,13 @@ export async function POST(request: NextRequest) {
         webhook_sent,
         webhook_error,
       },
-      { status: 201 },
+      { status: 201, headers: corsHeaders },
     )
   } catch (error) {
     console.error("[v0] API error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500, headers: getCorsHeaders(request) },
+    )
   }
 }
