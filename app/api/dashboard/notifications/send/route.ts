@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       data,
       expires_at,
       recipients,
+      broadcast_all = false,
       send_email = true,
     } = body as {
       app_id?: string
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
       data?: Record<string, any>
       expires_at?: string | null
       recipients?: RecipientInput[]
+      broadcast_all?: boolean
       send_email?: boolean
     }
 
@@ -46,9 +48,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "app_id, title y message son requeridos" }, { status: 400 })
     }
 
-    if (!Array.isArray(recipients) || recipients.length === 0) {
-      return NextResponse.json({ ok: false, error: "recipients es requerido" }, { status: 400 })
-    }
+    let resolvedRecipients: RecipientInput[] = Array.isArray(recipients) ? recipients : []
 
     const { data: application, error: appError } = await supabase
       .from("applications")
@@ -59,6 +59,25 @@ export async function POST(request: Request) {
 
     if (appError || !application) {
       return NextResponse.json({ ok: false, error: "Aplicación no encontrada o sin acceso" }, { status: 404 })
+    }
+
+    if (broadcast_all) {
+      const { data: appUsers, error: usersError } = await supabase
+        .from("app_users")
+        .select("external_user_id,email")
+        .eq("app_id", app_id)
+
+      if (usersError) {
+        return NextResponse.json({ ok: false, error: usersError.message }, { status: 500 })
+      }
+
+      resolvedRecipients = (appUsers || [])
+        .filter((u) => u?.external_user_id)
+        .map((u) => ({ user_id: String(u.external_user_id), email: u.email || undefined }))
+    }
+
+    if (!Array.isArray(resolvedRecipients) || resolvedRecipients.length === 0) {
+      return NextResponse.json({ ok: false, error: "recipients es requerido" }, { status: 400 })
     }
 
     const results: Array<{
@@ -73,7 +92,7 @@ export async function POST(request: Request) {
       error?: string
     }> = []
 
-    for (const r of recipients) {
+    for (const r of resolvedRecipients) {
       const user_id = (r?.user_id || "").trim()
       const email = (r?.email || "").trim() || undefined
 
@@ -198,6 +217,22 @@ export async function POST(request: Request) {
         emailed,
         webhook_sent,
         webhook_error,
+      })
+    }
+
+    if (broadcast_all) {
+      const total_users = resolvedRecipients.length
+      const inserted_count = results.filter((r) => r.inserted).length
+      const emailed_count = results.filter((r) => r.emailed).length
+      const failed_email_count = results.filter((r) => Boolean(r.email_error)).length
+      return NextResponse.json({
+        ok: true,
+        broadcast_all: true,
+        total_users,
+        inserted_count,
+        emailed_count,
+        failed_email_count,
+        results,
       })
     }
 
