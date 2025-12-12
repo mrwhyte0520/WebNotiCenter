@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { validateApiKey } from "@/lib/api-auth"
+import { createClient as createSupabaseJsClient } from "@supabase/supabase-js"
 import { type NextRequest, NextResponse } from "next/server"
 
  function getCorsHeaders(request: NextRequest) {
@@ -65,7 +66,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No valid users provided" }, { status: 400, headers: corsHeaders })
     }
 
-    const supabase = await createClient()
+    const supabaseUrl = process.env.SUPABASE_URL
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const supabase = supabaseUrl && serviceRoleKey
+      ? createSupabaseJsClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+      : await createClient()
 
     const { data, error } = await supabase
       .from("app_users")
@@ -74,7 +79,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("[v1] Error upserting app users:", error)
-      return NextResponse.json({ error: "Failed to sync app users" }, { status: 500, headers: corsHeaders })
+      return NextResponse.json(
+        { error: "Failed to sync app users", details: error.message },
+        { status: 500, headers: corsHeaders },
+      )
     }
 
     return NextResponse.json(

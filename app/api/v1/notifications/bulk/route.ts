@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { validateApiKey } from "@/lib/api-auth"
+import { createClient as createSupabaseJsClient } from "@supabase/supabase-js"
 import { type NextRequest, NextResponse } from "next/server"
 
  function getCorsHeaders(request: NextRequest) {
@@ -55,7 +56,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = await createClient()
+    const supabaseUrl = process.env.SUPABASE_URL
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const supabase = supabaseUrl && serviceRoleKey
+      ? createSupabaseJsClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+      : await createClient()
 
     const notificationsToInsert = notifications.map((n) => ({
       app_id: application.id,
@@ -76,7 +81,7 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("[v0] Error creating bulk notifications:", error)
       return NextResponse.json(
-        { error: "Failed to create notifications" },
+        { error: "Failed to create notifications", details: error.message },
         { status: 500, headers: corsHeaders },
       )
     }
