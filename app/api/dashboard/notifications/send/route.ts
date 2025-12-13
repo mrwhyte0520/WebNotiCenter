@@ -48,6 +48,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "app_id, title y message son requeridos" }, { status: 400 })
     }
 
+    if (!broadcast_all) {
+      if (!Array.isArray(recipients) || recipients.length === 0) {
+        return NextResponse.json({ ok: false, error: "recipients es requerido" }, { status: 400 })
+      }
+    }
+
     let resolvedRecipients: RecipientInput[] = Array.isArray(recipients) ? recipients : []
 
     const { data: application, error: appError } = await supabase
@@ -62,18 +68,135 @@ export async function POST(request: Request) {
     }
 
     if (broadcast_all) {
-      const { data: appUsers, error: usersError } = await supabase
-        .from("app_users")
-        .select("external_user_id,email")
-        .eq("app_id", app_id)
+      const PAGE_SIZE = 1000
+      const INSERT_BATCH_SIZE = 500
 
-      if (usersError) {
-        return NextResponse.json({ ok: false, error: usersError.message }, { status: 500 })
+      let total_users = 0
+      let inserted_count = 0
+      let emailed_count = 0
+      let failed_email_count = 0
+
+      let webhook_sent = false
+      let webhook_error: string | undefined
+
+      let from = 0
+      while (true) {
+        const to = from + PAGE_SIZE - 1
+        const { data: appUsers, error: appUsersError } = await supabase
+          .from("app_users")
+          .select("external_user_id,email")
+          .eq("app_id", app_id)
+          .order("created_at", { ascending: true })
+          .range(from, to)
+
+        if (appUsersError) {
+          return NextResponse.json({ ok: false, error: appUsersError.message }, { status: 500 })
+        }
+
+        if (!appUsers || appUsers.length === 0) {
+          break
+        }
+
+        total_users += appUsers.length
+
+        for (let i = 0; i < appUsers.length; i += INSERT_BATCH_SIZE) {
+          const chunk = appUsers.slice(i, i + INSERT_BATCH_SIZE)
+
+          const notificationsToInsert = chunk.map((u) => ({
+            app_id,
+            user_id: u.external_user_id,
+            title,
+            message,
+            type,
+            priority,
+            data,
+            expires_at: expires_at || null,
+          }))
+
+          const { data: createdNotifications, error: insertError } = await supabase
+            .from("notifications")
+            .insert(notificationsToInsert)
+            .select("id,user_id")
+
+          if (insertError) {
+            return NextResponse.json({ ok: false, error: insertError.message }, { status: 500 })
+          }
+
+          inserted_count += createdNotifications?.length || 0
+
+          if (send_email) {
+            const emailByUserId = new Map<string, string>()
+            for (const u of chunk) {
+              if (u.email) emailByUserId.set(u.external_user_id, u.email)
+            }
+
+            for (const n of createdNotifications || []) {
+              const toEmail = emailByUserId.get(n.user_id)
+              if (!toEmail) {
+                failed_email_count += 1
+                continue
+              }
+              try {
+                await sendNotificationEmail({
+                  to: toEmail,
+                  subject: title,
+                  title,
+                  message,
+                  appName: application.name,
+                })
+                emailed_count += 1
+              } catch {
+                failed_email_count += 1
+              }
+            }
+          }
+        }
+
+        if (appUsers.length < PAGE_SIZE) {
+          break
+        }
+        from += PAGE_SIZE
       }
 
-      resolvedRecipients = (appUsers || [])
-        .filter((u) => u?.external_user_id)
-        .map((u) => ({ user_id: String(u.external_user_id), email: u.email || undefined }))
+      if (application.webhook_url && inserted_count > 0) {
+        try {
+          await fetch(application.webhook_url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Notification-Event": "notification.broadcast_created",
+              "X-Notification-App-Id": app_id,
+            },
+            body: JSON.stringify({
+              event: "notification.broadcast_created",
+              app_id,
+              title,
+              message,
+              type,
+              priority,
+              data,
+              expires_at: expires_at || null,
+              count: inserted_count,
+            }),
+          })
+          webhook_sent = true
+        } catch (webhookError: unknown) {
+          webhook_sent = false
+          webhook_error = webhookError instanceof Error ? webhookError.message : "Error enviando webhook"
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        broadcast_all: true,
+        total_users,
+        inserted_count,
+        send_email,
+        emailed_count,
+        failed_email_count,
+        webhook_sent,
+        webhook_error,
+      })
     }
 
     if (!Array.isArray(resolvedRecipients) || resolvedRecipients.length === 0) {

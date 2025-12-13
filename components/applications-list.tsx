@@ -36,6 +36,10 @@ interface ApplicationsListProps {
   onApplicationUpdated?: (app: Application) => void
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 export function ApplicationsList({ applications, onApplicationDeleted, onApplicationUpdated }: ApplicationsListProps) {
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
@@ -109,6 +113,10 @@ export function ApplicationsList({ applications, onApplicationDeleted, onApplica
   }
 
   const regenerateApiKey = async (id: string) => {
+    if (!id || id === "undefined" || !isUuid(id)) {
+      console.error("Error regenerando API Key: applicationId inválido", { id })
+      return
+    }
     try {
       setRegeneratingId(id)
 
@@ -173,7 +181,7 @@ export function ApplicationsList({ applications, onApplicationDeleted, onApplica
                     variant="outline"
                     size="sm"
                     onClick={() => regenerateApiKey(app.id)}
-                    disabled={regeneratingId === app.id}
+                    disabled={regeneratingId === app.id || !app.id || !isUuid(app.id)}
                   >
                     {regeneratingId === app.id ? "Regenerando..." : "Regenerar API Key"}
                   </Button>
