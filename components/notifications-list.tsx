@@ -28,7 +28,22 @@ export function NotificationsList({ applications }: NotificationsListProps) {
     setLoading(true)
     const supabase = createClient()
 
-    let query = supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(100)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      setNotifications([])
+      setLoading(false)
+      return
+    }
+
+    let query = supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100)
 
     if (filterApp !== "all") {
       query = query.eq("app_id", filterApp)
